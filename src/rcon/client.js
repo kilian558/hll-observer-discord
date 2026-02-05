@@ -1,4 +1,4 @@
-import { Rcon } from 'rcon-srcds';
+import Rcon from 'modern-rcon';
 import { EventEmitter } from 'events';
 
 export class RconClient extends EventEmitter {
@@ -16,36 +16,20 @@ export class RconClient extends EventEmitter {
 
   async connect() {
     try {
-      this.rcon = new Rcon({
-        host: this.host,
-        port: this.port,
-        timeout: 5000
-      });
+      this.rcon = new Rcon(this.host, this.port, this.password, 5000);
 
       console.log(`🔌 Verbinde mit RCON Server: ${this.host}:${this.port}`);
       
-      await this.rcon.authenticate(this.password);
+      await this.rcon.connect();
       
       console.log('✅ RCON Verbindung hergestellt');
       this.authenticated = true;
       this.reconnectAttempts = 0;
 
-      // Event Listener
-      this.rcon.on('error', (err) => {
-        console.error('❌ RCON Fehler:', err.message);
-        this.authenticated = false;
-        this.handleDisconnect();
-      });
-
-      this.rcon.on('end', () => {
-        console.log('🔌 RCON Verbindung geschlossen');
-        this.authenticated = false;
-        this.handleDisconnect();
-      });
-
       return true;
     } catch (error) {
       console.error('❌ RCON Verbindung fehlgeschlagen:', error.message);
+      this.authenticated = false;
       this.handleDisconnect();
       throw error;
     }
@@ -84,7 +68,7 @@ export class RconClient extends EventEmitter {
       console.error('Fehler beim Abrufen der Spielerinformationen:', error);
       return [];
     }
-  }
+  }send
 
   parsePlayerInfo(response) {
     const players = [];
