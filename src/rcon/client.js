@@ -22,7 +22,7 @@ export class RconClient extends EventEmitter {
       
       return new Promise((resolve, reject) => {
         this.socket = new net.Socket();
-        this.socket.setEncoding('utf8');
+        // WICHTIG: Kein Encoding setzen - RCON ist binär!
 
         this.socket.connect(this.port, this.host, async () => {
           console.log('🔗 TCP-Verbindung hergestellt');
@@ -145,7 +145,7 @@ export class RconClient extends EventEmitter {
 
   parseResponses(data) {
     const responses = [];
-    const buffer = Buffer.from(data, 'utf8');
+    const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
     let offset = 0;
 
     while (offset < buffer.length) {
@@ -157,7 +157,12 @@ export class RconClient extends EventEmitter {
       const id = buffer.readInt32LE(offset + 4);
       const type = buffer.readInt32LE(offset + 8);
       const bodyLength = size - 10;
-      const body = buffer.toString('utf8', offset + 12, offset + 12 + bodyLength);
+      
+      // Body ohne die beiden Null-Bytes am Ende
+      let body = '';
+      if (bodyLength > 0) {
+        body = buffer.toString('utf8', offset + 12, offset + 12 + bodyLength);
+      }
 
       responses.push({ id, type, body });
       offset += 4 + size;
