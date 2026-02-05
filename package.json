@@ -1,0 +1,37 @@
+{
+  "name": "hll-observer-discord-bot",
+  "version": "1.0.0",
+  "description": "Discord Bot zur Visualisierung von Hell Let Loose Server-Daten mit Map und Team-Positionen",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "deploy": "node src/deploy-commands.js",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop hll-observer-bot",
+    "pm2:restart": "pm2 restart hll-observer-bot",
+    "pm2:logs": "pm2 logs hll-observer-bot",
+    "pm2:delete": "pm2 delete hll-observer-bot"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "hll",
+    "hell-let-loose",
+    "observer",
+    "rcon"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.1",
+    "canvas": "^2.11.2",
+    "axios": "^1.6.7",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "pm2": "^5.3.1"
+  }
+}
