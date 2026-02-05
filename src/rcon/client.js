@@ -39,6 +39,7 @@ export class RconClient extends EventEmitter {
         });
 
         this.socket.on('data', (data) => {
+          console.log(`📥 Empfange ${data.length} Bytes:`, data.toString('hex').substring(0, 100) + (data.length > 50 ? '...' : ''));
           this.handleData(data);
         });
 
@@ -113,10 +114,14 @@ export class RconClient extends EventEmitter {
       buffer.writeInt8(0, 12 + cmdBuffer.length);
       buffer.writeInt8(0, 12 + cmdBuffer.length + 1);
 
+      console.log(`📤 Sende RCON Paket: Type=${type}, ID=${id}, Size=${size}, Command="${command}"`);
+      console.log(`📤 Raw Bytes (${buffer.length}):`, buffer.toString('hex').match(/.{1,2}/g).join(' '));
+
       this.pendingResponses.set(id, { 
         resolve, 
         reject, 
         timeout: setTimeout(() => {
+          console.log(`⏱️ Timeout für Command ID ${id} (Type ${type})`);
           this.pendingResponses.delete(id);
           reject(new Error('Command timeout'));
         }, 10000) 
@@ -129,13 +134,17 @@ export class RconClient extends EventEmitter {
   handleData(data) {
     try {
       const responses = this.parseResponses(data);
+      console.log(`✅ ${responses.length} Response(s) geparst`);
       
       for (const response of responses) {
+        console.log(`📨 Response: ID=${response.id}, Type=${response.type}, Body="${response.body.substring(0, 50)}${response.body.length > 50 ? '...' : ''}"}`);
         const pending = this.pendingResponses.get(response.id);
         if (pending) {
           clearTimeout(pending.timeout);
           this.pendingResponses.delete(response.id);
           pending.resolve(response);
+        } else {
+          console.log(`⚠️ Keine pending Response für ID ${response.id}`);
         }
       }
     } catch (error) {
