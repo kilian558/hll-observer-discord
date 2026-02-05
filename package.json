@@ -30,7 +30,7 @@
     "canvas": "^2.11.2",
     "axios": "^1.6.7",
     "node-cron": "^3.0.3",
-    "modern-rcon": "^1.2.2"
+    "rcon-client": "^4.2.3"
   },
   "devDependencies": {
     "pm2": "^5.3.1"

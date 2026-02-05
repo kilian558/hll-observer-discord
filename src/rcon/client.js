@@ -1,4 +1,4 @@
-import Rcon from 'modern-rcon';
+import { Rcon } from 'rcon-client';
 import { EventEmitter } from 'events';
 
 export class RconClient extends EventEmitter {
@@ -16,12 +16,14 @@ export class RconClient extends EventEmitter {
 
   async connect() {
     try {
-      this.rcon = new Rcon(this.host, this.port, this.password, 5000);
+      this.rcon = await Rcon.connect({
+        host: this.host,
+        port: this.port,
+        password: this.password,
+        timeout: 5000
+      });
 
-      console.log(`🔌 Verbinde mit RCON Server: ${this.host}:${this.port}`);
-      
-      await this.rcon.connect();
-      
+      console.log(`🔌 Verbunden mit RCON Server: ${this.host}:${this.port}`);
       console.log('✅ RCON Verbindung hergestellt');
       this.authenticated = true;
       this.reconnectAttempts = 0;
@@ -168,7 +170,7 @@ export class RconClient extends EventEmitter {
 
   disconnect() {
     if (this.rcon) {
-      this.rcon.disconnect();
+      this.rcon.end();
       this.rcon = null;
       this.authenticated = false;
     }
