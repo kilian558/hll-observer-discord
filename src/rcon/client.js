@@ -1,4 +1,4 @@
-import { Rcon } from 'rcon-client';
+import net from 'net';
 import { EventEmitter } from 'events';
 
 export class RconClient extends EventEmitter {
@@ -7,50 +7,149 @@ export class RconClient extends EventEmitter {
     this.host = host;
     this.port = port;
     this.password = password;
-    this.rcon = null;
+    this.socket = null;
     this.authenticated = false;
     this.reconnectDelay = 5000;
     this.maxReconnectAttempts = 5;
     this.reconnectAttempts = 0;
+    this.messageId = 0;
+    this.pendingResponses = new Map();
   }
 
   async connect() {
     try {
       console.log(`🔌 Verbinde mit RCON Server: ${this.host}:${this.port}`);
       
-      this.rcon = await Rcon.connect({
-        host: this.host,
-        port: this.port,
-        password: this.password,
-        timeout: 10000  // 10 Sekunden Timeout
+      return new Promise((resolve, reject) => {
+        this.socket = new net.Socket();
+        this.socket.setEncoding('utf8');
+
+        this.socket.connect(this.port, this.host, async () => {
+          console.log('🔗 TCP-Verbindung hergestellt');
+          
+          try {
+            await this.authenticate();
+            console.log('✅ RCON Verbindung hergestellt');
+            this.authenticated = true;
+            this.reconnectAttempts = 0;
+            resolve(true);
+          } catch (authError) {
+            reject(authError);
+          }
+        });
+
+        this.socket.on('data', (data) => {
+          this.handleData(data);
+        });
+
+        this.socket.on('error', (err) => {
+          console.error('❌ RCON Socket Fehler:', err.message);
+          this.authenticated = false;
+          this.handleDisconnect();
+          reject(err);
+        });
+
+        this.socket.on('close', () => {
+          console.log('🔌 RCON Verbindung geschlossen');
+          this.authenticated = false;
+          this.handleDisconnect();
+        });
+
+        this.socket.setTimeout(15000);
+        this.socket.on('timeout', () => {
+          console.error('⏱️ RCON Timeout');
+          this.socket.destroy();
+          reject(new Error('Connection timeout'));
+        });
       });
-
-      console.log('✅ RCON Verbindung hergestellt');
-      this.authenticated = true;
-      this.reconnectAttempts = 0;
-
-      // Event Listener für Disconnect
-      this.rcon.on('end', () => {
-        console.log('🔌 RCON Verbindung wurde geschlossen');
-        this.authenticated = false;
-        this.handleDisconnect();
-      });
-
-      this.rcon.on('error', (err) => {
-        console.error('❌ RCON Fehler:', err.message);
-        this.authenticated = false;
-      });
-
-      return true;
     } catch (error) {
       console.error('❌ RCON Verbindung fehlgeschlagen:', error.message);
       console.error('   Host:', this.host);
-      console.error('   Port:', this.port);
-      console.error('   Prüfe: Firewall, Port-Weiterleitung, RCON-Passwort');
-      this.authenticated = false;
-      this.handleDisconnect();
-      throw error;
+    if (!this.authenticated || !this.socket) {
+      throw new Error('RCON nicht verbunden oder authentifiziert');
     }
+
+    try {
+      const response = await this.sendRawCommand(2, command); // Type 2 = SERVERDATA_EXECCOMMAND
+      return response.body || '';
+  async authenticate() {
+    // HLL/Source RCON Authentifizierung
+    const response = await this.sendRawCommand(3, this.password);
+    if (response.type === 2) {
+      console.log('🔐 RCON Authentifizierung erfolgreich');
+      return true;
+    } else {
+      throw new Error('RCON Authentifizierung fehlgeschlagen - falsches Passwort?');
+    }
+  }
+
+  sendRawCommand(type, command) {
+    return new Promise((resolve, reject) => {
+      if (!this.socket || this.socket.destroyed) {
+        reject(new Error('Socket nicht verbunden'));
+        return;
+      }
+
+      const id = this.messageId++;
+      const cmdBuffer = Buffer.from(command, 'utf8');
+      const size = 10 + cmdBuffer.length; // 4 (size) + 4 (id) + 4 (type) + cmd + 2 nulls
+      
+      const buffer = Buffer.alloc(size + 4);
+      buffer.writeInt32LE(size, 0);
+      buffer.writeInt32LE(id, 4);
+      buffer.writeInt32LE(type, 8);
+      cmdBuffer.copy(buffer, 12);
+      buffer.writeInt8(0, 12 + cmdBuffer.length);
+      buffer.writeInt8(0, 12 + cmdBuffer.length + 1);
+
+      this.pendingResponses.set(id, { resolve, reject, timeout: setTimeout(() => {
+        this.pendingResponses.delete(id);
+        reject(new Error('Command timeout'));
+      }, 10000) });
+
+      this.socket.write(buffer);
+    });
+  }
+
+  handleData(data) {
+    try {
+      // Sehr vereinfachte Antwort-Verarbeitung
+      const responses = this.parseResponses(data);
+      
+      for (const response of responses) {
+        const pending = this.pendingResponses.get(response.id);
+        if (pending) {
+          clearTimeout(pending.timeout);
+          this.pendingResponses.delete(response.id);
+          pending.resolve(response);
+        }
+      }
+    } catch (error) {
+      console.error('Fehler beim Parsen der RCON-Antwort:', error);
+    }
+  }
+
+  parseResponses(data) {
+    const responses = [];
+    const buffer = Buffer.from(data, 'utf8');
+    let offset = 0;
+
+    while (offset < buffer.length) {
+      if (offset + 4 > buffer.length) break;
+      
+      const size = buffer.readInt32LE(offset);
+      if (offset + 4 + size > buffer.length) break;
+      
+      const id = buffer.readInt32LE(offset + 4);
+      const type = buffer.readInt32LE(offset + 8);
+      const bodyLength = size - 10;
+      const body = buffer.toString('utf8', offset + 12, offset + 12 + bodyLength);
+
+      responses.push({ id, type, body });
+      offset += 4 + size;
+    }
+
+    return responses;
   }
 
   handleDisconnect() {
@@ -185,9 +284,9 @@ export class RconClient extends EventEmitter {
   }
 
   disconnect() {
-    if (this.rcon) {
-      this.rcon.end();
-      this.rcon = null;
+    if (this.socket) {
+      this.socket.destroy();
+      this.socket = null;
       this.authenticated = false;
     }
   }
