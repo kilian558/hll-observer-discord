@@ -21,6 +21,9 @@ export class RconClient extends EventEmitter {
     try {
       console.log(`🔌 Verbinde mit RCON Server: ${this.host}:${this.port}`);
       
+      // Buffer zurücksetzen bei neuer Verbindung
+      this.receiveBuffer = Buffer.alloc(0);
+      
       return new Promise((resolve, reject) => {
         this.socket = new net.Socket();
         // WICHTIG: Kein Encoding setzen - RCON ist binär!
@@ -87,12 +90,26 @@ export class RconClient extends EventEmitter {
 
   async authenticate() {
     // HLL/Source RCON Authentifizierung
-    const response = await this.sendRawCommand(3, this.password);
-    if (response.type === 2) {
-      console.log('🔐 RCON Authentifizierung erfolgreich');
-      return true;
-    } else {
-      throw new Error('RCON Authentifizierung fehlgeschlagen - falsches Passwort?');
+    try {
+      const response = await this.sendRawCommand(3, this.password);
+      console.log(`🔑 Auth Response: ID=${response.id}, Type=${response.type}, Body="${response.body}"`);
+      
+      // Bei Source RCON:
+      // - Erfolg: Type=2 oder Type=0 mit gleicher ID
+      // - Fehler: ID=-1 (ungültiges Passwort)
+      if (response.id === -1) {
+        throw new Error('RCON Authentifizierung fehlgeschlagen - FALSCHES PASSWORT!');
+      }
+      
+      if (response.type === 2 || response.type === 0) {
+        console.log('🔐 RCON Authentifizierung erfolgreich');
+        return true;
+      }
+      
+      throw new Error(`RCON Auth unerwartete Response: Type=${response.type}, ID=${response.id}`);
+    } catch (error) {
+      console.error('❌ Auth fehlgeschlagen:', error.message);
+      throw error;
     }
   }
 
