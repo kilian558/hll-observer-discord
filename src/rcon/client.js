@@ -1,4 +1,4 @@
-import Rcon from 'rcon-srcds';
+import { Rcon } from 'rcon-srcds';
 import { EventEmitter } from 'events';
 
 export class RconClient extends EventEmitter {
