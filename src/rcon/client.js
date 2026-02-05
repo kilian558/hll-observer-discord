@@ -89,24 +89,36 @@ export class RconClient extends EventEmitter {
   }
 
   async authenticate() {
-    // HLL/Source RCON Authentifizierung
+    // HLL RCON Authentifizierung (modifiziertes Source RCON Protokoll)
     try {
-      const response = await this.sendRawCommand(3, this.password);
-      console.log(`🔑 Auth Response: ID=${response.id}, Type=${response.type}, Body="${response.body}"`);
+      console.log('🔑 Sende Auth-Paket...');
       
-      // Bei Source RCON:
-      // - Erfolg: Type=2 oder Type=0 mit gleicher ID
-      // - Fehler: ID=-1 (ungültiges Passwort)
-      if (response.id === -1) {
+      // Erstes Auth-Paket senden
+      const authResponse = await this.sendRawCommand(3, this.password);
+      console.log(`📨 Auth Response #1: ID=${authResponse.id}, Type=${authResponse.type}, Body="${authResponse.body}"`);
+      
+      // Bei HLL: Prüfe ob ID=-1 (falsches Passwort)
+      if (authResponse.id === -1 || authResponse.id === 0xFFFFFFFF) {
         throw new Error('RCON Authentifizierung fehlgeschlagen - FALSCHES PASSWORT!');
       }
       
-      if (response.type === 2 || response.type === 0) {
-        console.log('🔐 RCON Authentifizierung erfolgreich');
-        return true;
+      // HLL sendet manchmal Type=0 statt Type=2 bei Erfolg
+      // Zusätzlich: Sende ein leeres Command-Paket zur Bestätigung (HLL-spezifisch)
+      if (authResponse.type === 2 || authResponse.type === 0) {
+        console.log('🔐 Erste Auth-Phase erfolgreich, sende Bestätigung...');
+        
+        // Zweites Paket (leerer Command) zur Bestätigung
+        try {
+          await this.sendRawCommand(2, '');
+          console.log('✅ RCON Authentifizierung erfolgreich');
+          return true;
+        } catch (confirmError) {
+          console.log('⚠️ Bestätigungs-Paket fehlgeschlagen, aber Auth scheint OK');
+          return true; // Auth war erfolgreich, auch wenn Bestätigung fehlschlug
+        }
       }
       
-      throw new Error(`RCON Auth unerwartete Response: Type=${response.type}, ID=${response.id}`);
+      throw new Error(`RCON Auth unerwartete Response: Type=${authResponse.type}, ID=${authResponse.id}`);
     } catch (error) {
       console.error('❌ Auth fehlgeschlagen:', error.message);
       throw error;
