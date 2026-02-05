@@ -14,6 +14,7 @@ export class RconClient extends EventEmitter {
     this.reconnectAttempts = 0;
     this.messageId = 0;
     this.pendingResponses = new Map();
+    this.receiveBuffer = Buffer.alloc(0); // Buffer für chunked data
   }
 
   async connect() {
@@ -133,7 +134,11 @@ export class RconClient extends EventEmitter {
 
   handleData(data) {
     try {
-      const responses = this.parseResponses(data);
+      // Daten an Buffer anhängen
+      this.receiveBuffer = Buffer.concat([this.receiveBuffer, data]);
+      console.log(`📦 Buffer jetzt ${this.receiveBuffer.length} Bytes`);
+      
+      const responses = this.parseResponses();
       console.log(`✅ ${responses.length} Response(s) geparst`);
       
       for (const response of responses) {
@@ -152,29 +157,44 @@ export class RconClient extends EventEmitter {
     }
   }
 
-  parseResponses(data) {
+  parseResponses() {
     const responses = [];
-    const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
     let offset = 0;
 
-    while (offset < buffer.length) {
-      if (offset + 4 > buffer.length) break;
+    while (offset < this.receiveBuffer.length) {
+      // Brauchen mindestens 4 Bytes für Size
+      if (offset + 4 > this.receiveBuffer.length) {
+        console.log(`⏸️ Warte auf mehr Daten (nur ${this.receiveBuffer.length - offset} Bytes verfügbar)`);
+        break;
+      }
       
-      const size = buffer.readInt32LE(offset);
-      if (offset + 4 + size > buffer.length) break;
+      const size = this.receiveBuffer.readInt32LE(offset);
+      const totalPacketSize = 4 + size; // Size-Feld + Paket
       
-      const id = buffer.readInt32LE(offset + 4);
-      const type = buffer.readInt32LE(offset + 8);
-      const bodyLength = size - 10;
+      // Warten bis komplettes Paket da ist
+      if (offset + totalPacketSize > this.receiveBuffer.length) {
+        console.log(`⏸️ Warte auf komplettes Paket (habe ${this.receiveBuffer.length - offset}/${totalPacketSize} Bytes)`);
+        break;
+      }
+      
+      const id = this.receiveBuffer.readInt32LE(offset + 4);
+      const type = this.receiveBuffer.readInt32LE(offset + 8);
+      const bodyLength = size - 10; // Size minus ID (4) + Type (4) + 2x Null (2)
       
       // Body ohne die beiden Null-Bytes am Ende
       let body = '';
       if (bodyLength > 0) {
-        body = buffer.toString('utf8', offset + 12, offset + 12 + bodyLength);
+        body = this.receiveBuffer.toString('utf8', offset + 12, offset + 12 + bodyLength);
       }
 
       responses.push({ id, type, body });
-      offset += 4 + size;
+      offset += totalPacketSize;
+    }
+
+    // Geparste Pakete aus Buffer entfernen
+    if (offset > 0) {
+      this.receiveBuffer = this.receiveBuffer.slice(offset);
+      console.log(`🗑️ ${offset} Bytes aus Buffer entfernt, ${this.receiveBuffer.length} verbleiben`);
     }
 
     return responses;
