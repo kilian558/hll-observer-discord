@@ -190,7 +190,6 @@ export class RconClient extends EventEmitter {
     }
   }
 }
-}
 
 export async function createRconClient(host, port, password) {
   const client = new RconClient(host, port, password);
