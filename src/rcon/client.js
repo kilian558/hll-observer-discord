@@ -16,21 +16,37 @@ export class RconClient extends EventEmitter {
 
   async connect() {
     try {
+      console.log(`🔌 Verbinde mit RCON Server: ${this.host}:${this.port}`);
+      
       this.rcon = await Rcon.connect({
         host: this.host,
         port: this.port,
         password: this.password,
-        timeout: 5000
+        timeout: 10000  // 10 Sekunden Timeout
       });
 
-      console.log(`🔌 Verbunden mit RCON Server: ${this.host}:${this.port}`);
       console.log('✅ RCON Verbindung hergestellt');
       this.authenticated = true;
       this.reconnectAttempts = 0;
 
+      // Event Listener für Disconnect
+      this.rcon.on('end', () => {
+        console.log('🔌 RCON Verbindung wurde geschlossen');
+        this.authenticated = false;
+        this.handleDisconnect();
+      });
+
+      this.rcon.on('error', (err) => {
+        console.error('❌ RCON Fehler:', err.message);
+        this.authenticated = false;
+      });
+
       return true;
     } catch (error) {
       console.error('❌ RCON Verbindung fehlgeschlagen:', error.message);
+      console.error('   Host:', this.host);
+      console.error('   Port:', this.port);
+      console.error('   Prüfe: Firewall, Port-Weiterleitung, RCON-Passwort');
       this.authenticated = false;
       this.handleDisconnect();
       throw error;
