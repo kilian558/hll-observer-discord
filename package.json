@@ -29,7 +29,8 @@
     "dotenv": "^16.4.1",
     "canvas": "^2.11.2",
     "axios": "^1.6.7",
-    "node-cron": "^3.0.3"
+    "node-cron": "^3.0.3",
+    "rcon-srcds": "^2.0.1"
   },
   "devDependencies": {
     "pm2": "^5.3.1"

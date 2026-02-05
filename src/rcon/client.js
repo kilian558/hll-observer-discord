@@ -1,4 +1,4 @@
-import net from 'net';
+import Rcon from 'rcon-srcds';
 import { EventEmitter } from 'events';
 
 export class RconClient extends EventEmitter {
@@ -7,7 +7,7 @@ export class RconClient extends EventEmitter {
     this.host = host;
     this.port = port;
     this.password = password;
-    this.socket = null;
+    this.rcon = null;
     this.authenticated = false;
     this.reconnectDelay = 5000;
     this.maxReconnectAttempts = 5;
@@ -15,41 +15,40 @@ export class RconClient extends EventEmitter {
   }
 
   async connect() {
-    return new Promise((resolve, reject) => {
-      this.socket = new net.Socket();
+    try {
+      this.rcon = new Rcon({
+        host: this.host,
+        port: this.port,
+        timeout: 5000
+      });
+
+      console.log(`🔌 Verbinde mit RCON Server: ${this.host}:${this.port}`);
       
-      this.socket.connect(this.port, this.host, () => {
-        console.log(`🔌 Verbunden mit RCON Server: ${this.host}:${this.port}`);
-        this.authenticate().then(resolve).catch(reject);
-      });
+      await this.rcon.authenticate(this.password);
+      
+      console.log('✅ RCON Verbindung hergestellt');
+      this.authenticated = true;
+      this.reconnectAttempts = 0;
 
-      this.socket.on('error', (err) => {
-        console.error('❌ RCON Socket Fehler:', err.message);
+      // Event Listener
+      this.rcon.on('error', (err) => {
+        console.error('❌ RCON Fehler:', err.message);
+        this.authenticated = false;
         this.handleDisconnect();
-        reject(err);
       });
 
-      this.socket.on('close', () => {
+      this.rcon.on('end', () => {
         console.log('🔌 RCON Verbindung geschlossen');
         this.authenticated = false;
         this.handleDisconnect();
       });
 
-      this.socket.setTimeout(10000);
-      this.socket.on('timeout', () => {
-        console.error('⏱️ RCON Timeout');
-        this.socket.destroy();
-      });
-    });
-  }
-
-  async authenticate() {
-    // Simplified RCON authentication
-    // For production, use proper RCON protocol implementation
-    console.log('🔐 Authentifizierung mit RCON Server...');
-    this.authenticated = true;
-    this.reconnectAttempts = 0;
-    return true;
+      return true;
+    } catch (error) {
+      console.error('❌ RCON Verbindung fehlgeschlagen:', error.message);
+      this.handleDisconnect();
+      throw error;
+    }
   }
 
   handleDisconnect() {
@@ -64,32 +63,17 @@ export class RconClient extends EventEmitter {
   }
 
   async sendCommand(command) {
-    if (!this.authenticated || !this.socket) {
+    if (!this.authenticated || !this.rcon) {
       throw new Error('RCON nicht verbunden oder authentifiziert');
     }
 
-    return new Promise((resolve, reject) => {
-      let response = '';
-
-      const dataHandler = (data) => {
-        response += data.toString();
-      };
-
-      this.socket.on('data', dataHandler);
-
-      this.socket.write(command + '\n', (err) => {
-        if (err) {
-          this.socket.off('data', dataHandler);
-          reject(err);
-          return;
-        }
-
-        setTimeout(() => {
-          this.socket.off('data', dataHandler);
-          resolve(response);
-        }, 500);
-      });
-    });
+    try {
+      const response = await this.rcon.execute(command);
+      return response;
+    } catch (error) {
+      console.error('Fehler beim Senden des RCON-Befehls:', error.message);
+      throw error;
+    }
   }
 
   async getPlayerInfo() {
@@ -107,19 +91,20 @@ export class RconClient extends EventEmitter {
     const lines = response.split('\n');
     
     for (const line of lines) {
-      // Parse format: "Name : Team : Role : Kills : Deaths : X : Y"
-      const match = line.match(/(.+?)\s*:\s*(.+?)\s*:\s*(.+?)\s*:\s*(\d+)\s*:\s*(\d+)\s*:\s*(-?\d+\.?\d*)\s*:\s*(-?\d+\.?\d*)/);
+      // HLL Format: Name: Team: Role: Kills: Deaths: X: Y
+      // Beispiel: "Player1 : Allies : Rifleman : 5 : 2 : 12345.67 : -9876.54"
+      const parts = line.split(':').map(s => s.trim());
       
-      if (match) {
+      if (parts.length >= 7) {
         players.push({
-          name: match[1].trim(),
-          team: match[2].trim().toLowerCase(),
-          role: match[3].trim(),
-          kills: parseInt(match[4]),
-          deaths: parseInt(match[5]),
+          name: parts[0],
+          team: parts[1].toLowerCase(),
+          role: parts[2],
+          kills: parseInt(parts[3]) || 0,
+          deaths: parseInt(parts[4]) || 0,
           position: {
-            x: parseFloat(match[6]),
-            y: parseFloat(match[7])
+            x: parseFloat(parts[5]) || 0,
+            y: parseFloat(parts[6]) || 0
           }
         });
       }
@@ -134,16 +119,15 @@ export class RconClient extends EventEmitter {
       return this.parseMapInfo(response);
     } catch (error) {
       console.error('Fehler beim Abrufen der Map-Informationen:', error);
-      return null;
+      return 'unknown';
     }
   }
 
   parseMapInfo(response) {
-    const lines = response.split('\n');
-    for (const line of lines) {
-      if (line.includes('Current map:')) {
-        return line.split(':')[1].trim();
-      }
+    // HLL gibt Map-Namen zurück wie "SME_P", "Carentan_P" etc.
+    const match = response.match(/(\w+)(?:_P)?/);
+    if (match) {
+      return match[1].toLowerCase();
     }
     return 'unknown';
   }
@@ -157,7 +141,9 @@ export class RconClient extends EventEmitter {
       return {
         alliedScore: 0,
         axisScore: 0,
-        remainingTime: '00:00:00'
+        remainingTime: '00:00:00',
+        playerCount: 0,
+        maxPlayers: 100
       };
     }
   }
@@ -173,17 +159,19 @@ export class RconClient extends EventEmitter {
 
     const lines = response.split('\n');
     for (const line of lines) {
-      if (line.includes('allied')) {
+      const lower = line.toLowerCase();
+      
+      if (lower.includes('allied')) {
         const match = line.match(/(\d+)/);
         if (match) state.alliedScore = parseInt(match[1]);
-      } else if (line.includes('axis')) {
+      } else if (lower.includes('axis')) {
         const match = line.match(/(\d+)/);
         if (match) state.axisScore = parseInt(match[1]);
-      } else if (line.includes('time')) {
-        const match = line.match(/(\d{2}:\d{2}:\d{2})/);
-        if (match) state.remainingTime = match[1];
-      } else if (line.includes('players')) {
-        const match = line.match(/(\d+)\/(\d+)/);
+      } else if (lower.includes('time') || lower.includes('remaining')) {
+        const match = line.match(/(\d{1,2}):(\d{2}):(\d{2})/);
+        if (match) state.remainingTime = `${match[1].padStart(2, '0')}:${match[2]}:${match[3]}`;
+      } else if (lower.includes('player')) {
+        const match = line.match(/(\d+)\s*\/\s*(\d+)/);
         if (match) {
           state.playerCount = parseInt(match[1]);
           state.maxPlayers = parseInt(match[2]);
@@ -195,12 +183,13 @@ export class RconClient extends EventEmitter {
   }
 
   disconnect() {
-    if (this.socket) {
-      this.socket.destroy();
-      this.socket = null;
+    if (this.rcon) {
+      this.rcon.disconnect();
+      this.rcon = null;
       this.authenticated = false;
     }
   }
+}
 }
 
 export async function createRconClient(host, port, password) {
