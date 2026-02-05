@@ -65,13 +65,24 @@ export class RconClient extends EventEmitter {
     } catch (error) {
       console.error('❌ RCON Verbindung fehlgeschlagen:', error.message);
       console.error('   Host:', this.host);
-    if (!this.authenticated || !this.socket) {
-      throw new Error('RCON nicht verbunden oder authentifiziert');
+      console.error('   Port:', this.port);
+      this.authenticated = false;
+      this.handleDisconnect();
+      throw error;
     }
+  }
 
-    try {
-      const response = await this.sendRawCommand(2, command); // Type 2 = SERVERDATA_EXECCOMMAND
-      return response.body || '';
+  handleDisconnect() {
+    if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      this.reconnectAttempts++;
+      console.log(`🔄 Versuche Wiederverbindung (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
+      setTimeout(() => this.connect().catch(console.error), this.reconnectDelay);
+    } else {
+      console.error('❌ Max Wiederverbindungsversuche erreicht');
+      this.emit('maxReconnectAttemptsReached');
+    }
+  }
+
   async authenticate() {
     // HLL/Source RCON Authentifizierung
     const response = await this.sendRawCommand(3, this.password);
@@ -92,7 +103,7 @@ export class RconClient extends EventEmitter {
 
       const id = this.messageId++;
       const cmdBuffer = Buffer.from(command, 'utf8');
-      const size = 10 + cmdBuffer.length; // 4 (size) + 4 (id) + 4 (type) + cmd + 2 nulls
+      const size = 10 + cmdBuffer.length;
       
       const buffer = Buffer.alloc(size + 4);
       buffer.writeInt32LE(size, 0);
@@ -102,10 +113,14 @@ export class RconClient extends EventEmitter {
       buffer.writeInt8(0, 12 + cmdBuffer.length);
       buffer.writeInt8(0, 12 + cmdBuffer.length + 1);
 
-      this.pendingResponses.set(id, { resolve, reject, timeout: setTimeout(() => {
-        this.pendingResponses.delete(id);
-        reject(new Error('Command timeout'));
-      }, 10000) });
+      this.pendingResponses.set(id, { 
+        resolve, 
+        reject, 
+        timeout: setTimeout(() => {
+          this.pendingResponses.delete(id);
+          reject(new Error('Command timeout'));
+        }, 10000) 
+      });
 
       this.socket.write(buffer);
     });
@@ -113,7 +128,6 @@ export class RconClient extends EventEmitter {
 
   handleData(data) {
     try {
-      // Sehr vereinfachte Antwort-Verarbeitung
       const responses = this.parseResponses(data);
       
       for (const response of responses) {
@@ -152,25 +166,14 @@ export class RconClient extends EventEmitter {
     return responses;
   }
 
-  handleDisconnect() {
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
-      this.reconnectAttempts++;
-      console.log(`🔄 Versuche Wiederverbindung (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
-      setTimeout(() => this.connect().catch(console.error), this.reconnectDelay);
-    } else {
-      console.error('❌ Max Wiederverbindungsversuche erreicht');
-      this.emit('maxReconnectAttemptsReached');
-    }
-  }
-
   async sendCommand(command) {
-    if (!this.authenticated || !this.rcon) {
+    if (!this.authenticated || !this.socket) {
       throw new Error('RCON nicht verbunden oder authentifiziert');
     }
 
     try {
-      const response = await this.rcon.execute(command);
-      return response;
+      const response = await this.sendRawCommand(2, command);
+      return response.body || '';
     } catch (error) {
       console.error('Fehler beim Senden des RCON-Befehls:', error.message);
       throw error;
@@ -185,15 +188,13 @@ export class RconClient extends EventEmitter {
       console.error('Fehler beim Abrufen der Spielerinformationen:', error);
       return [];
     }
-  }send
+  }
 
   parsePlayerInfo(response) {
     const players = [];
     const lines = response.split('\n');
     
     for (const line of lines) {
-      // HLL Format: Name: Team: Role: Kills: Deaths: X: Y
-      // Beispiel: "Player1 : Allies : Rifleman : 5 : 2 : 12345.67 : -9876.54"
       const parts = line.split(':').map(s => s.trim());
       
       if (parts.length >= 7) {
@@ -225,7 +226,6 @@ export class RconClient extends EventEmitter {
   }
 
   parseMapInfo(response) {
-    // HLL gibt Map-Namen zurück wie "SME_P", "Carentan_P" etc.
     const match = response.match(/(\w+)(?:_P)?/);
     if (match) {
       return match[1].toLowerCase();
