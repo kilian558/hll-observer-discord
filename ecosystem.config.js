@@ -1,4 +1,4 @@
-export default {
+module.exports = {
   apps: [{
     name: 'hll-observer-bot',
     script: './src/index.js',
@@ -6,6 +6,8 @@ export default {
     exec_mode: 'fork',
     watch: false,
     max_memory_restart: '500M',
+    interpreter: 'node',
+    node_args: '',
     env: {
       NODE_ENV: 'production'
     },
