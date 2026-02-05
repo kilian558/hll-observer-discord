@@ -45,11 +45,28 @@ def test_rcon():
         sock.sendall(auth_packet.encode())
         print(f"📤 Auth-Paket gesendet (Passwort: {PASSWORD})")
         
-        # Antwort empfangen
+        # Antwort empfangen (mehrfach versuchen)
         print("📥 Warte auf Antwort...")
-        data = sock.recv(4096)
-        print(f"📦 Empfangen: {len(data)} Bytes")
-        print(f"📦 Hex: {data.hex()}")
+        all_data = b''
+        attempts = 0
+        while attempts < 5:
+            try:
+                sock.settimeout(2)
+                chunk = sock.recv(4096)
+                if chunk:
+                    all_data += chunk
+                    print(f"📦 Chunk {attempts+1}: {len(chunk)} Bytes - {chunk.hex()}")
+                    attempts += 1
+                else:
+                    break
+            except socket.timeout:
+                print(f"⏱️ Timeout nach {len(all_data)} Bytes")
+                break
+        
+        data = all_data
+        print(f"📦 Gesamt empfangen: {len(data)} Bytes")
+        if data:
+            print(f"📦 Hex: {data.hex()}")
         
         if len(data) >= 12:
             response = RconPacket.decode(data)
